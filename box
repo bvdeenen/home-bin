@@ -28,9 +28,7 @@ BWRAP=(bwrap
     --dir /etc
     --hostname sandbox
 
-    # Warning: this script shares all environment variables.
-    # If on your system the environment can contain secrets,
-    # you may want to clear them:
+    # clear all environment variables
     --clearenv
 
     # Bind the current folder read-write and chdir there.
@@ -49,8 +47,10 @@ SYS_RO_BINDS=(
     # Random configuration files that programs tend to need.
     /etc/alternatives
     /etc/nsswitch.conf
+    /etc/man_db.conf
     /etc/hosts
     /etc/localtime
+    /etc/passwd
     /etc/timezone
     /etc/pki
     /etc/ca-certificates
@@ -62,15 +62,12 @@ SYS_RO_BINDS=(
     /usr/lib/jvm
     /usr/share/java
 )
-# Bind all of them read-only.
-for p in "${SYS_RO_BINDS[@]}"; do
-    [[ -e "$p" ]] && BWRAP+=(--ro-bind "$p" "$p")
-done
 
 BWRAP+=(--ro-bind-try /etc/ld.so.cache /etc/ld.so.cache)
 
 # resolv.conf is fun because it's a symlink into /run,
 # a folder which we do not want to expose.
+# not the case on Void Linux, but we leave this trick in.
 RESOLV_REAL="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
 if [[ -n "$RESOLV_REAL" && -f "$RESOLV_REAL" ]]; then
     BWRAP+=(--ro-bind "$RESOLV_REAL" /etc/resolv.conf)
@@ -88,8 +85,13 @@ BWRAP+=(--setenv HOME "$HOME"
     --dir "$HOME")
 
 # --- Home read-only binds ---
+# don't put ~/ in front!
 HOME_RO_BINDS=(
+    bin
     .local/bin
+    .bashrc
+    .bashrc.sandbox
+    .config/plasma-workspace
     .local/share/claude
     .local/lib/node_modules
     .local/lib/python3.13
@@ -101,7 +103,17 @@ HOME_RO_BINDS=(
     .config/tmux
     .cache/ms-playwright
     .cache/corepack
+    .bashrc
 )
+
+# Bind all sys binds read-only.
+for p in "${SYS_RO_BINDS[@]}"; do
+    [[ -e "$p" ]] && BWRAP+=(--ro-bind "$p" "$p")
+done
+for rel in "${HOME_RO_BINDS[@]}"; do
+    [[ -e "$HOME/$rel" ]] && BWRAP+=(--ro-bind "$HOME/$rel" "$HOME/$rel")
+done
+
 # --- Home read-write binds ---
 HOME_RW_BINDS=(
     .local/share/nvim
@@ -111,9 +123,6 @@ HOME_RW_BINDS=(
     .config/gh
     go
 )
-for rel in "${HOME_RO_BINDS[@]}"; do
-    [[ -e "$HOME/$rel" ]] && BWRAP+=(--ro-bind "$HOME/$rel" "$HOME/$rel")
-done
 for rel in "${HOME_RW_BINDS[@]}"; do
     [[ -e "$HOME/$rel" ]] && BWRAP+=(--bind "$HOME/$rel" "$HOME/$rel")
 done
@@ -131,6 +140,7 @@ done
 # Set up $PATH with the paths that we have inside this sandbox.
 BWRAP+=(--setenv PATH "$HOME/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin")
 BWRAP+=(--setenv COLORTERM 1)
+BWRAP+=(--setenv USER "$USER")
 BWRAP+=(--setenv TERM xterm-color)
 
 # Execute our big commandline and pass it

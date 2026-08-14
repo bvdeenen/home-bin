@@ -6,9 +6,9 @@ from os.path import basename, dirname
 class Segment(BasicSegment):
     def add_to_powerline(self):
 
-        s=check_output(["which", "python"]).decode('utf8').strip()
+        s = check_output(["which", "python3"]).decode("utf8").strip()
         env = basename(dirname(dirname(dirname(s))))
-        if env=='':
+        if env == "":
             return
         bg = self.powerline.theme.VIRTUAL_ENV_BG
         fg = self.powerline.theme.VIRTUAL_ENV_FG
