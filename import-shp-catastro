@@ -1,0 +1,12 @@
+#!/bin/bash
+
+usage() {
+    echo "$0 <shapefile> <tablename>"
+    exit 1
+}
+
+if [ ! -f "$1" -o -z "$2" ] ; then
+    usage
+fi
+
+/usr/lib/psql17/bin/shp2pgsql -I -s 25830 "$1" public.$2 | psql catastro

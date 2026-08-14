@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+
+import os, sys
+import xmltodict
+
+def main(f):
+    d = xmltodict.parse(open(f, 'rb'))
+    point = [p for p in d['kml']['Document']['Placemark'] if 'Point' in
+             p.keys()][0]['Point']['coordinates']
+    (lon,lat) = [float(p) for p in point.split(",")][:2]
+    print(f"{lat},{lon}")
+
+if __name__ == '__main__':
+    main(sys.argv[1])

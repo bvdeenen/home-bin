@@ -1,0 +1,15 @@
+#!/bin/bash
+
+what=$1
+case $what in
+    chore|ci|feat|fix|docs|style|refactor|perf|test|build|revert|other) ;;
+    *) echo "no valid choice '$what'"
+        exit 1
+        ;;
+esac
+shift
+ticket=$(git branch --show-current | sed -E 's/.*\/(pace-[0-9]+)/\1/')
+
+git commit -a -m"$what($ticket): $*"
+
+

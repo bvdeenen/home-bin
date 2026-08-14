@@ -1,0 +1,4 @@
+#!/bin/bash
+mm=$(git mm)
+!(git checkout $mm) && git pull --rebase && git-remove-remote-merged
+git scan

@@ -1,0 +1,57 @@
+#!/bin/bash
+
+set -e
+
+m=$(git mm)
+
+unpushed () {
+    echo $(git rev-list HEAD@{upstream}..HEAD | wc -l)
+}
+
+merged () {
+    echo $(git branch -a --merged | egrep -v "^\*|$m|origin")
+}
+remote_merged () {
+    echo $(git branch --remote --merged origin/$m |  egrep -v "^\*|$m" | egrep -v '\->' | cut -b 10- | xargs)
+}
+
+err_report() {
+    echo "Error in $($PWD) Line: $1, Error: $(caller)"
+}
+
+trap 'err_report $LINENO' ERR
+
+find . -maxdepth 3 -mindepth 1 -name .git -type d | while read f
+do
+    cd "$(dirname "$f")" > /dev/null
+    pwd
+    git fetch -p
+
+    branch_name="$(git symbolic-ref HEAD 2>/dev/null)" ||
+    branch_name="(unnamed branch)"     # detached HEAD
+    branch_name=${branch_name##refs/heads/}
+    if [ "$branch_name" != "$m" ] ; then
+        printf "%s branch: %s\n" $PWD $branch_name
+    fi
+    ct=$(unpushed)
+    status=$( git status --porcelain )
+    merged_branches=$(merged)
+    remote_merged=$(remote_merged)
+    if [[ $ct -ne 0 || -n "$status" || -n "$merged_branches" || -n "$remote_merged" ]] ; then
+        printf "\n\n***************** git repo $PWD **********************\n"
+        if (( $ct > 0 )) ; then
+            printf "$ct unpushed commits\n"
+        fi
+        if [ "$status" != "" ] ; then
+            printf "$(git status)\n"
+        fi
+        if [ -n "$merged_branches" ] ; then
+            printf "merged branches: %s\n" $merged_branches
+        fi
+        if [ -n "$remote_merged" ] ; then
+            printf "remote_merged branches: %s\n" $remote_merged
+        fi
+        printf "\n"
+    fi
+    cd - > /dev/null
+done

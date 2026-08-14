@@ -1,0 +1,17 @@
+#!/bin/bash
+# vim:syntax=sh
+
+find . -type d -name .git | grep -v '\.terraform' | while read f ; do cd "$f/.."
+echo $PWD
+branch=$(git branch --show-current)
+if [[ "$branch" != "master" ]] ; then
+    echo "Switching $PWD to master"
+    git checkout master
+fi
+f=$(git fetch)
+if [[ "$f" != "" ]] ; then
+    git pull
+fi
+cd - > /dev/null
+done
+

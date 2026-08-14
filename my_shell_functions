@@ -1,0 +1,675 @@
+declare -A HELP_TEXT
+
+HELP_TEXT[sdk]='sdk - The command line interface (CLI) for SDKMAN!
+
+SYNOPSIS
+    sdk <subcommand> [candidate] [version]
+
+DESCRIPTION
+    SDKMAN! is a tool for managing parallel versions of multiple JVM related
+    Software Development Kits on most Unix based systems. It provides a
+    convenient Command Line Interface (CLI) and API for installing, switching,
+    removing and listing Candidates.
+'
+HELP_TEXT[br]='br (broot shell integration)'
+
+HELP_TEXT[find - most - recent]='find-most-recent
+
+find the most recent file recursively from the cwd'
+function find-most-recent() {
+    ls -l $(find . -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -f2- -d" ")
+}
+
+HELP_TEXT['scan-lan']='scan-lan
+
+Scan the lan via avahi-browse'
+
+function scan-lan() {
+    local script=$(
+        cat <<-'EOF'
+        $1=="=" && $8!="" && $3=="IPv4" {printf "%-16s %-6s %-30s %s\n",$8,$9,$7, $4}
+EOF
+    )
+    avahi-browse -rtpa | awk -F';' "$script" | sort -u
+}
+
+HELP_TEXT[latlon2utm]='latlon2utm
+
+latlon2utm converts clipboard lat, lon to utm 30N'
+function latlon2utm() {
+    python3 ~/bin/latlon-to-utm30N.py
+}
+
+HELP_TEXT[pdfcat]='pdfcat [-o/-O <output-file>] [input-file...]
+
+Concatenate input pdf files into output-file (default output.pdf). Use -O to overwrite '
+pdfcat() {
+    local OPTIND # VERY important, won't work otherwise!!
+    local OUTFILE="output.pdf"
+    local OVERWRITE=0
+
+    while getopts o:O: ARG; do
+        case "$ARG" in
+        o) OUTFILE="$OPTARG" ;;
+        O)
+            OUTFILE="$OPTARG"
+            OVERWRITE=1
+            ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+
+    # If no input files were given
+    if (($# == 0)); then
+        echo "Error: No input PDF files provided" >&2
+        return 1
+    fi
+
+    # Check all inputs exist
+    for f in "$@"; do
+        if [[ ! -f "$f" ]]; then
+            echo "Input file not found: $f" >&2
+            return 1
+        fi
+    done
+
+    # Check output / overwrite logic
+    if [[ $OVERWRITE -eq 0 && -f "$OUTFILE" ]]; then
+        printf >&2 "Won't overwrite existing '%s'. Use -O to force overwrite.\n" "$OUTFILE"
+        return 1
+    fi
+
+    local verb="Creating"
+    [[ -f "$OUTFILE" ]] && verb="Overwriting"
+    echo "$verb $OUTFILE ..." >&2
+
+    # The actual merge — note the -- at the end is important
+    qpdf --empty --pages "$@" -- "$OUTFILE"
+}
+
+HELP_TEXT[barcode]='barcode [string]
+
+Uses zint to generate a barcode from the argument or clipboard'
+function barcode() {
+    (
+        local b=${1:-$(xclip -o)} # parameter or clipboard
+        b=${b//\"/}               # strip quotes
+        if [[ $b == "" ]]; then
+            echo "argument is empty"
+            exit 1
+        fi
+        zint --notext -d "$b"
+        echo "Created out.png" >&2
+    )
+    return $?
+}
+
+isfloat() { printf '%f' "$1" &>/dev/null; }
+
+HELP_TEXT[elevation]='elevation [lat, lon]
+
+Queries open-meteo.com to get elevation. Takes value from clipboard when parameter is absent.
+Parameter is comma separated lat,lon pair (like google maps)'
+function elevation() {
+    (
+        latlon=${1:-$(xclip -o)} # parameter or clipboard
+        latlon=${latlon//\"/}    # strip quotes
+        IFS=', ' read lat lon <<<$latlon
+        if ! isfloat "$lat"; then
+            echo "lat:$lat is not a float"
+            exit 1
+        fi
+        if ! isfloat "$lon"; then
+            echo "lon:$lon is not a float"
+            exit 1
+        fi
+        curl -s "https://api.open-meteo.com/v1/elevation?latitude=$lat&longitude=$lon" | jq -r .elevation[0]
+    )
+    return $?
+}
+
+HELP_TEXT[fix - alphas]='fix-alphas <input.png> <output.png>
+
+treshold alpha at 50%.
+Zig code https://github.com/bvdeenen/fix-alphas/tree/master'
+function fix-alphas() {
+    ~/binaries/fix-alphas "$@"
+}
+
+HELP_TEXT[check - alphas]='check-alphas # recursively finds pngs and checks alpha treshold'
+function check-alphas() {
+    py=$(
+        cat <<-'EOF'
+        import sys
+        import numpy as np
+        from glob import glob
+        import matplotlib.pyplot as plt
+
+        for f in glob("**/*.png", recursive=True):
+            try:
+                img = plt.imread(f)
+                h,w,pix = img.shape
+            except Exception as e:
+                print("\033[0;31m", f, e, "\033[0m")
+                continue
+            if pix == 4:
+                alphas = img[:,:,3].flatten()
+                hist = np.histogram(alphas, bins=256)[0]
+                ok = hist[1:-1].sum() == 0
+            else:
+                ok = True
+            symbol = "✓" if ok else "\u26A0"
+            print(symbol, "w:", w, "h:", h, f)
+EOF
+    )
+    python -c "$py"
+}
+
+HELP_TEXT[bitscope]='bitscope
+
+start bitscope application'
+function bitscope() {
+    (
+        set -e
+        cd ~/binaries/bitscope-dso_2.6.EA17H_amd64/
+        ./usr/bin/start-bitscope-dso
+    )
+}
+
+HELP_TEXT[background - remover]='background-remover
+
+remove the background from <file> and create a file with "no-bg" suffix'
+function background-remover() {
+    [[ ! -f $1 ]] && return 1
+    out="${1%.*}-wo-bg.png"
+    id=$(notify-send -t 30000 -a background-remover --print-id "removing background from $1. Creating $out.")
+    backgroundremover -i "$1" -o "$out"
+    notify-send -a background-remover --replace-id $id "Done"
+}
+
+function az() {
+    PYTHONPATH=~/lib/azure-cli ~/lib/azure-cli/bin/python -m azure.cli "$@"
+}
+
+HELP_TEXT[cb2png]='cb2png
+
+copy clipboard into png file. Optional filename arg.'
+function cb2png() {
+    image=${1:-clipboard.png}
+    xclip -selection clipboard -t image/png -o >$image
+}
+
+HELP_TEXT[cb]='cb [text ...]
+
+
+A shortcut function that simplifies usage of xclip.
+- Accepts input from either stdin (pipe), or params.
+'
+cb() {
+    local _scs_col="\e[0;32m"
+    local _wrn_col='\e[1;31m'
+    local _trn_col='\e[0;33m'
+    # Check that xclip is installed.
+    if ! type xclip >/dev/null 2>&1; then
+        echo -e "$_wrn_col""You must have the 'xclip' program installed.\e[0m"
+    # Check user is not root (root doesn't have access to user xorg server)
+    elif [[ "$USER" == "root" ]]; then
+        echo -e "$_wrn_col""Must be regular user (not root) to copy a file to the clipboard.\e[0m"
+    else
+        # If no tty, data should be available on stdin
+        if ! [[ "$(tty)" == /dev/* ]]; then
+            input="$(</dev/stdin)"
+        # Else, fetch input from params
+        else
+            input="$*"
+        fi
+        if [ -z "$input" ]; then # If no input, print usage message.
+            echo "Copies a string to the clipboard."
+            echo "Usage: cb <string>"
+            echo "       echo <string> | cb"
+        else
+            # Copy input to clipboard
+            echo -n "$input" | xclip -selection c
+            # Truncate text for status
+            if [ ${#input} -gt 80 ]; then input="$(echo $input | cut -c1-80)$_trn_col...\e[0m"; fi
+            # Print status.
+            echo -e "$_scs_col""Copied to clipboard:\e[0m $input"
+        fi
+    fi
+}
+
+HELP_TEXT[convert - dvds]='convert-dvds
+
+Convert all .VOB files below a certain directory (as argument)'
+function convert-dvds() {
+
+    if [[ -z $1 ]]; then
+        echo "Usage: $0 <dir-name>"
+        return 1
+    fi
+    name=$(basename "$1")
+    if [[ ! -d $name ]]; then
+        echo "$name is not a directory"
+        return 1
+    fi
+
+    set -x
+    t=$(mktemp).vob
+    rm -f $t
+    cat "${1}"/VIDEO_TS/*.VOB >$t
+    ffmpeg -i $t -c:v libx264 "${name}.mp4"
+    rm $t
+    set +x
+}
+
+HELP_TEXT[deb - extract]='deb-extract <deb-file>
+
+Extract the data tarfile from a .deb file into a subdir with the base name of the deb file'
+function deb-extract() {
+    local debfile=$1
+    if [[ ! -f $debfile ]]; then
+        echo "deb-extract <deb-file>"
+        return 1
+    fi
+    dname=${debfile%.deb}
+    [[ -d $dname ]] || (
+        mkdir $dname
+        echo "Created $dname" >/dev/stderr
+    )
+    ar t $1 | grep -q data.tar.gz
+    if [[ $? -eq 0 ]]; then
+        ar p "$debfile" data.tar.gz | tar -C $dname -xzf -
+    else
+        ar t $1 | grep -q data.tar.xz
+        if [[ $? -eq 0 ]]; then
+            ar p "$debfile" data.tar.xz | tar -C $dname -xJf -
+        else
+            echo "Don't know what to do with this debian file" >/dev/stderr
+        fi
+    fi
+    tree $dname >/dev/stderr
+}
+
+HELP_TEXT[download - site]='download-site <url> [levels]
+
+Download a site (arg 1) with optional max number of levels'
+function download-site() {
+    if [[ -z $1 || $2 && ! $2 =~ ^[0-9]+ ]]; then
+        echo "download-site <url> [level]"
+        return 1
+    fi
+    if [[ $2 ]]; then
+        level="--level=$2"
+    else
+        level=""
+    fi
+    wget --recursive \
+        --no-clobber \
+        --convert-links \
+        --adjust-extension \
+        --html-extension \
+        -U Mozilla $level --ignore-length \
+        --page-requisites \
+        --restrict-file-names=ascii \
+        -erobots=off $1
+}
+
+HELP_TEXT[follow - symlinks]='follow-symlinks
+
+Follow a symlink until its non-symlink root'
+function follow-symlinks() {
+    file=$1
+    if [[ ! -L "$file" ]]; then
+        echo "use follow-symlinks <symlink>"
+        return 1
+    fi
+
+    echo "Following symlink $file"
+    while true; do
+        #echo -n "$file"
+        f=$(readlink -n $file)
+        if [[ $? == 0 ]]; then
+            echo "symlinks to $f"
+            file=$f
+        else
+            echo "reached real file: $file"
+            return 0
+        fi
+    done
+}
+
+HELP_TEXT[bash - colors]='bash-colors
+
+This function echoes a bunch of color codes to the 
+terminal to demonstrate what''s available.  Each 
+line is the color code of one forground color,
+out of 17 (default + 16 escapes), followed by a 
+test use of that color on all nine background 
+colors (default + 8 escapes).'
+function bash-colors() {
+
+    T='gYw' # The test text
+
+    echo -e "\n                 40m     41m     42m     43m     44m     45m     46m     47m"
+
+    for FGs in '    m' '   1m' '  30m' '1;30m' '  31m' '1;31m' '  32m' \
+        '1;32m' '  33m' '1;33m' '  34m' '1;34m' '  35m' '1;35m' \
+        '  36m' '1;36m' '  37m' '1;37m'; do
+        FG=${FGs// /}
+        echo -en " $FGs \033[$FG  $T  "
+        for BG in 40m 41m 42m 43m 44m 45m 46m 47m; do
+            echo -en "$EINS \033[$FG\033[$BG  $T  \033[0m"
+        done
+        echo
+    done
+    echo
+}
+
+HELP_TEXT[analyze - startup]='analyze-startup
+
+Analyze the timing of ~/.bash-startup-log'
+function analyze-startup() {
+    local t_old
+    t_old=-1
+    while read -r line; do
+        read -r t what <<<$line
+        if ((t_old != -1)); then
+            printf "%03d ms. %s\n" $((t - t_old)) "$what"
+        fi
+        t_old=$t
+    done <~/.bash-startup-log
+}
+
+HELP_TEXT[git - find - branches]='git-find-branches
+
+Find all git repos below cwd that are on non-master branches'
+function git-find-branches() {
+    find . -type d -name .git |
+        while read d; do
+            cd $(dirname $d)
+            branch=$(git branch --show-current)
+            if [[ $branch != "master" && $branch != "main" ]]; then
+                echo $PWD $branch
+            fi
+            cd - >/dev/null
+        done
+
+}
+
+HELP_TEXT[iptables - clear]='iptables-clear
+
+set default iptables policies to let everything in'
+function iptables-clear() {
+
+    sudo ip6tables --policy INPUT ACCEPT
+    sudo ip6tables --policy OUTPUT ACCEPT
+    sudo ip6tables --policy FORWARD ACCEPT
+
+    ##
+    ## start fresh
+    sudo ip6tables -Z # zero counters
+    sudo ip6tables -F # flush (delete) rules
+    sudo ip6tables -X # delete all extra chains
+
+    # IPv4
+
+    ##
+    ## set default policies to let everything in
+    sudo iptables --policy INPUT ACCEPT
+    sudo iptables --policy OUTPUT ACCEPT
+    sudo iptables --policy FORWARD ACCEPT
+
+    ##
+    ## start fresh
+    sudo iptables -Z # zero counters
+    sudo iptables -F # flush (delete) rules
+    sudo iptables -X # delete all extra chains
+}
+
+HELP_TEXT[json - diff]='json-diff <file1> <file2>
+
+Show the diff between two json files
+
+gron: https://github.com/tomnomnom/gron'
+function json-diff() {
+    GRON=gron
+    DIFF=diff
+    # colordiff: https://www.colordiff.org
+    COLORDIFF=colordiff
+
+    # use colordiff in interactive mode, diff otherwise
+    if [ -t 1 ]; then
+        DIFFER=${COLORDIFF}
+    else
+        DIFFER=${DIFF}
+    fi
+
+    LOCAL="$1"
+    REMOTE="$2"
+    "${DIFFER}" -u --label "a/$REMOTE" --label "b/$REMOTE" <("$GRON" <"$LOCAL") <("$GRON" <"$REMOTE") | less -R
+}
+
+HELP_TEXT[psg]='psg
+
+grep in the processes list'
+function psg() {
+    ps aux | grep -i $@ | egrep -v "psg|grep"
+}
+
+HELP_TEXT[record - desktop]='record-desktop [filename:-recording.mkv]
+
+record the desktop until ctrl-C. Optional filename argument'
+function record-desktop() {
+    local filename=${1:-recording.mkv}
+    ffmpeg -f alsa -ac 1 -i default -f x11grab -r 15 -s 1366x768 -i :0.0 -vcodec mpeg4 "$filename"
+}
+
+HELP_TEXT[run - kst]='run-kst
+
+run kst in a docker. Probably obsolete'
+function run-kst() {
+    xhost +
+    docker run -ti --rm \
+        -v $PWD:/home/developer/data \
+        -e DISPLAY=$DISPLAY \
+        -v /tmp/.X11-unix:/tmp/.X11-unix kst
+}
+
+HELP_TEXT[update - svlogj]='update-svlogj
+
+Update svlogj to the newest version from github'
+function update-svlogj() {
+    local url
+    RELEASE_API_URL="https://api.github.com/repos/bvdeenen/svlogj/releases/latest"
+    TARBALL_URL=$(curl --silent "$RELEASE_API_URL" | jq --raw-output '.assets[0].browser_download_url')
+    echo $TARBALL_URL >/dev/stderr
+    curl --silent --location $TARBALL_URL --output - | tar xz -C ~/bin
+    ~/bin/svlogj version >/dev/stderr
+}
+
+HELP_TEXT[shrink - photos]='shrink-photos <perc.> [file ...]
+
+Shrink photos by a percentage'
+function shrink-photos() {
+    local percent=$1
+    if [[ "$percent" =~ ^[1-9][0-9]$ ]] && ((percent >= 10 && percent <= 99)); then
+        shift
+        while [ ! -z "$1" ]; do
+            bak="${1%.*}_bak.${1##*.}"
+            mv "$1" "$bak"
+            magick "$bak" -scale ${percent}% "$1"
+            shift
+        done
+    else
+        echo "Use shrink-photos <percentage> [file ...]"
+        return 1
+    fi
+}
+
+HELP_TEXT[wait - for - file - to - stabilize]='wait-for-file-to-stabilize <file>
+
+Wait for file to stop changing'
+function wait-for-file-to-stabilize() {
+    FILE="$1"
+    if [ ! -f "$FILE" ]; then
+        echo "Usage: wait-for-file-to-stabilize <file>"
+        return 1
+    fi
+
+    while [ $(($(date +%s) - $(stat -c %Y "$FILE"))) -lt 10 ]; do
+        sleep 1
+    done
+}
+
+HELP_TEXT[ansicolors]='ansicolors
+show all ansi colors between 0 and 255'
+function ansicolors() {
+    py=$(
+        cat <<-EOF
+        import sys
+        for i in range(0, 16):
+            for j in range(0, 16):
+                code = str(i * 16 + j)
+                sys.stdout.write(u"\u001b[38;5;" + code + "m " + code.ljust(4))
+            print(u"\u001b[0m")
+EOF
+    )
+    python -c "$py"
+}
+
+HELP_TEXT[docker - removecontainers]='docker-removecontainers
+
+Stop and remove all containers'
+function docker-removecontainers() {
+    docker stop $(docker ps -aq)
+    docker rm $(docker ps -aq)
+}
+
+HELP_TEXT[docker - armageddon]='docker-armageddon
+
+Remove everything from docker: containers, networks, images, volumes'
+function docker-armageddon() {
+    docker-removecontainers
+    docker network prune -f
+    docker rmi -f $(docker images --filter dangling=true -qa)
+    docker volume rm $(docker volume ls --filter dangling=true -q)
+    docker rmi -f $(docker images -qa)
+}
+
+HELP_TEXT[tnew]='tnew
+
+Create a tmux session, or attach to an existing one named basename(dir)'
+function tnew() {
+    direnv exec / tmux new-session -As $(basename $PWD)
+}
+
+function op() {
+    op=$(which op)
+    if [[ $1 == "signin" ]]; then
+        eval $($op "$@")
+    else
+        $op "$@"
+    fi
+}
+
+HELP_TEXT[xbld]='xbld [void-packages dir (~/void-packages)]
+
+Interactive single-select builder/installer for restricted packages using fzf + bat preview '
+function xbld() {
+    local dir="${1:-$HOME/void-packages}"
+
+    if [[ ! -d "$dir/srcpkgs" ]]; then
+        echo "Error: $dir does not look like a void-packages tree" >&2
+        return 1
+    fi
+    (
+        set -e
+        cd "$dir" || exit 1
+        git pull --rebase
+
+        # Collect restricted package names cleanly
+        local pkgs
+        pkgs=$(
+            shopt -s extglob nullglob
+            cd srcpkgs 2>/dev/null || exit 1
+            grep -l '^restricted=yes' **/template 2>/dev/null |
+                awk -F/ '{print $1}' |
+                sort -u
+        )
+
+        if [[ -z "$pkgs" ]]; then
+            echo "No restricted packages found." >&2
+            exit 0
+        fi
+
+        # fzf single select with bat preview
+        local selection
+        selection=$(
+            echo "$pkgs" | fzf \
+                --height 60% \
+                --layout=reverse \
+                --border \
+                --prompt="Select restricted package to build+install → " \
+                --header="Restricted packages in $(basename "$dir")" \
+                --preview 'p={}; bat --color=always --style=numbers --line-range :500 "$PWD/srcpkgs/$p/template" ' \
+                --preview-window=right:50%:wrap \
+                --header='ctrl-u=check for updates' \
+                --bind "ctrl-u:preview( ./xbps-src update-check {} )"
+        )
+
+        if [[ -z "$selection" ]]; then
+            echo "Nothing selected."
+            exit 0
+        fi
+
+        echo
+        echo "→ Selected: $selection"
+        echo "  Building and installing..."
+
+        # Optional: clean first if you often want fresh builds
+        # ./xbps-src clean-restricted "$selection"  # uncomment if desired
+
+        if ./xbps-src pkg "$selection" && command -v xi >/dev/null 2>&1; then
+            yes | xi "$selection"
+        else
+            echo "Build failed or 'xi' command not found." >&2
+            return 1
+        fi
+    )
+    return $?
+}
+
+function _Help_1line() {
+    helptext="${HELP_TEXT[$1]}"
+    printf "\033[34m%s\033[0m\n" "${helptext%%$'\n'*}"
+}
+
+function Help() {
+    # generic help function to show the commented
+    local fname=$1
+    local exclude='^(_|nvm|gawk|have|Help|quote)'
+    if [[ ! $fname ]]; then
+        (compgen -A function | egrep -v $exclude | sort | while read f; do
+            printf "%s\034%s\n" $f "$(_Help_1line $f)"
+        done) | column --table --separator $'\034'
+    else
+        if [[ $fname == '-l' ]]; then
+            compgen -A function | egrep -v $exclude | sort
+        else
+            helptext="${HELP_TEXT[$fname]}"
+            if [[ $helptext ]]; then
+                echo "$helptext"
+            else
+                echo "No help for $fname"
+                declare -f "$fname" | sed '1,2d;$d'
+            fi
+        fi
+    fi
+}
+
+function _Help_auto_complete() {
+    COMPREPLY=($(compgen -W "$(Help -l)" -- "$2"))
+}
+complete -F _Help_auto_complete Help
+
+# vim:ft=bash

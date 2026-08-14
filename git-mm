@@ -1,0 +1,12 @@
+#!/bin/bash
+if [ -f .git-mainbranch ] ; then
+    echo -n $(cat .git-mainbranch)
+else
+    egrep -q '^\[branch "main"\]$' .git/config
+    if [ $? -ne 0 ] ; then
+        echo -n master
+    else
+        echo -n main
+    fi
+fi
+# vim:syntax=sh
