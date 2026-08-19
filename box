@@ -104,6 +104,7 @@ HOME_RO_BINDS=(
     .cache/ms-playwright
     .cache/corepack
     .bashrc
+    binaries/zig/
 )
 
 # Bind all sys binds read-only.
@@ -119,6 +120,7 @@ HOME_RW_BINDS=(
     .local/share/nvim
     .claude
     .claude.json
+    .grok
     .cache
     .config/gh
     go
@@ -138,10 +140,14 @@ for rel in "${HOME_TMP_OVERLAYS[@]}"; do
 done
 
 # Set up $PATH with the paths that we have inside this sandbox.
-BWRAP+=(--setenv PATH "$HOME/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin")
+BWRAP+=(--setenv PATH "$HOME/bin:$HOME/.local/bin:$HOME/binaries/zig:/usr/local/bin:/usr/bin:/bin")
 BWRAP+=(--setenv COLORTERM 1)
 BWRAP+=(--setenv USER "$USER")
 BWRAP+=(--setenv TERM xterm-color)
+
+if [ -d "/tmp/claude-mcp-browser-bridge-${USER}" ]; then
+    BWRAP+=(--bind "/tmp/claude-mcp-browser-bridge-${USER}" "/tmp/claude-mcp-browser-bridge-${USER}")
+fi
 
 # Execute our big commandline and pass it
 # the rest of the arguments (the command to run).
