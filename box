@@ -23,26 +23,23 @@ if [[ -f "$TARGET_KEY" && -n "${SSH_AUTH_SOCK:-}" ]]; then
     # Get the precise fingerprint of the target key
     TARGET_FINGERPRINT=$(ssh-keygen -l -f "$TARGET_KEY" | awk '{print $2}')
 
-    # Verify the key is actually unlocked and present in your host/KDE agent right now
-    if ssh-add -l | grep -q "$TARGET_FINGERPRINT"; then
-
-        # 2. Spin up the dedicated sandbox agent
-        SOCKET_DIR=$(mktemp -d -t bwrap-ssh-agent.XXXXXXXX)
-        SSH_AUTH_SOCK_HOST="$SOCKET_DIR/ssh-agent.sock"
-        eval "$(ssh-agent -a "$SSH_AUTH_SOCK_HOST")" >/dev/null
-
-        echo "🔄 Loading $TARGET_KEY into sandbox agent..."
-
-        # 3. Load the key from its file into the sandbox agent. An agent never exports
-        # private keys, so it can't be copied from the host agent. Only the socket
-        # enters the sandbox, never the key file. ksshaskpass can get the passphrase from KWallet.
-        SSH_ASKPASS="${SSH_ASKPASS:-ksshaskpass}" SSH_ASKPASS_REQUIRE=prefer \
-            ssh-add "$TARGET_KEY" </dev/null
-
-    else
-        echo "⚠️ Warning: Target key ($TARGET_KEY) is not unlocked in your host's ssh-agent."
-        echo "Please run 'ssh-add $TARGET_KEY' on your host first, or let KDE unlock it."
+    # Unlock the key in your host/KDE agent first if it isn't there yet
+    if ! ssh-add -l | grep -qF "$TARGET_FINGERPRINT"; then
+        ssh-add "$TARGET_KEY"
     fi
+
+    # 2. Spin up the dedicated sandbox agent
+    SOCKET_DIR=$(mktemp -d -t bwrap-ssh-agent.XXXXXXXX)
+    SSH_AUTH_SOCK_HOST="$SOCKET_DIR/ssh-agent.sock"
+    eval "$(ssh-agent -a "$SSH_AUTH_SOCK_HOST")" >/dev/null
+
+    echo "🔄 Loading $TARGET_KEY into sandbox agent..."
+
+    # 3. Load the key from its file into the sandbox agent. An agent never exports
+    # private keys, so it can't be copied from the host agent. Only the socket
+    # enters the sandbox, never the key file. ksshaskpass can get the passphrase from KWallet.
+    SSH_ASKPASS="${SSH_ASKPASS:-ksshaskpass}" SSH_ASKPASS_REQUIRE=prefer \
+        ssh-add "$TARGET_KEY" </dev/null
 fi
 
 # Export ALLOW_NET=0 to disable network access inside the sandbox.
