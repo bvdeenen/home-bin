@@ -8,4 +8,4 @@ if [ ! -f $large ]; then
     exit 1
 fi
 
-magick $large -resize 800 -format jpg image-small.jpg
+magick $large -resize 800 -format png image-small.png

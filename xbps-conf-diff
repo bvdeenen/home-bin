@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+# https://gitlab.com/wef/dotfiles/-/blob/master/bin/xbps-conf-diff
+TIME_STAMP="20261026.182239"
+
+# Copyright (C) 2026 Bob Hepple  <bob dot hepple at gmail dot com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import argparse
+import glob
+import hashlib
+import os
+import plistlib
+import re
+import subprocess
+import sys
+
+DB_DIR = "/var/db/xbps"
+
+def sha(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def distributed(pkg, path):
+    """Return the packaged version of 'path' as bytes, or None."""
+    try:
+        r = subprocess.run(["xbps-query", "-R", f"--cat={path}", pkg],
+                           capture_output=True)
+    except FileNotFoundError:
+        return None
+    return r.stdout if r.returncode == 0 and r.stdout else None
+
+
+def conf_files(only=None):
+    """Yield (pkg, path, recorded_sha256) for every declared conf_file."""
+    for p in sorted(glob.glob(os.path.join(DB_DIR, ".*-files.plist"))):
+        pkg = re.match(r"\.(.+)-files\.plist$", os.path.basename(p)).group(1)
+        if only and pkg != only:
+            continue
+        with open(p, "rb") as f:
+            data = plistlib.load(f)
+        for cf in data.get("conf_files", []):
+            yield pkg, cf["file"], cf["sha256"]
+
+
+def status(path, want):
+    """Return 'MISSING', 'MODIFIED', 'PENDING', 'UNREADABLE' or None."""
+    if not os.path.isfile(path):
+        return "MISSING"
+    try:
+        if sha(path) != want:
+            return "MODIFIED"
+        # Matches the recorded hash, but a differing .new-* file
+        # still needs merging
+        pending = latest_pending(path)
+        if pending and sha(pending) != sha(path):
+            return "PENDING"
+        return None
+    except PermissionError:
+        return "UNREADABLE"
+
+
+def _natkey(s):
+    """Split into digit/non-digit runs so 1.10 sorts after 1.9."""
+    return [(0, int(t)) if t.isdigit() else (1, t)
+            for t in re.findall(r"\d+|\D+", s)]
+
+
+def _suffix_key(suffix):
+    """Sort key for '<version>_<revision>'."""
+    ver, sep, rev = suffix.rpartition("_")
+    if not sep or not rev.isdigit():
+        ver, rev = suffix, "0"
+    return (_natkey(ver), int(rev))
+
+
+def pending_files(path):
+    """Return all 'path.new-<version>_<revision>' files, oldest first."""
+    prefix = path + ".new-"
+    found = glob.glob(glob.escape(prefix) + "*")
+    return sorted(found, key=lambda f: _suffix_key(f[len(prefix):]))
+
+
+def latest_pending(path):
+    """Return the newest 'path.new-<version>_<revision>' file, or None."""
+    found = pending_files(path)
+    return found[-1] if found else None
+
+
+_shown = 0      # number of diffs printed so far (for blank-line separators)
+
+def show_diff(pkg, path):
+    global _shown
+    if _shown:
+        print()
+    _shown += 1
+    print(f"===== {path}  (package: {pkg}) =====")
+
+    # A pending .new-* file is the newer distributed version
+    pending = latest_pending(path)
+    if pending:
+        print(f"--- diff against pending {pending}")
+        print("    ('-' = yours, '+' = new upstream)")
+        sys.stdout.flush()
+        subprocess.run(["diff", "-u", path, pending])
+        return
+
+    orig = distributed(pkg, path)
+    if orig is None:
+        print("  could not fetch distributed version "
+              "(not in repo, or no network)")
+        return
+
+    tmp = f"/tmp/xbps-conf-diff.{os.getpid()}.{pkg}.{os.path.basename(path)}"
+    try:
+        with open(tmp, "wb") as t:
+            t.write(orig)
+        print("--- diff against repository version")
+        print("    ('-' = yours, '+' = new upstream)")
+        sys.stdout.flush()
+        subprocess.run(["diff", "-u", path, tmp])
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def is_package(name):
+    return os.path.exists(os.path.join(DB_DIR, f".{name}-files.plist"))
+
+
+def find_file(name):
+    """Return (pkg, path, recorded_sha256) for conf file 'name', or None."""
+    path = os.path.abspath(name)
+    for entry in conf_files():
+        if entry[1] == path:
+            return entry
+    return None
+
+
+def resolve(target):
+    """Work out what 'target' means.
+
+    Return (kind, entries): kind is 'all' (target is None), 'pkg' or
+    'file'; entries is a list of (pkg, path, recorded_sha256).
+    Return None (after printing an error) if it is neither an installed
+    package nor a configuration file.  A target containing '/' is always
+    treated as a file, so use ./name to force a file.
+    """
+    if target is None:
+        return "all", list(conf_files())
+    if "/" not in target and is_package(target):
+        return "pkg", list(conf_files(target))
+    entry = find_file(target)
+    if entry:
+        return "file", [entry]
+    if "/" in target:
+        print(f"{target}: not a configuration file of any package",
+              file=sys.stderr)
+    else:
+        print(f"{target}: not an installed package or a configuration "
+              "file of any package", file=sys.stderr)
+    return None
+
+
+def do_list(entries):
+    """Print the modified entries.  Return True if any were printed."""
+    found = False
+    for pkg, path, want in entries:
+        st = status(path, want)
+        if st:
+            found = True
+            line = f"{st:<10} {pkg:<24} {path}"
+            pend = pending_files(path)
+            if pend:
+                line += " " + " ".join(pend)
+            print(line)
+    return found
+
+
+def do_diff(entries, single):
+    """Diff the modified entries.  If 'single' (an explicitly named file),
+    also report if it is unmodified or missing.
+    Return (found_or_reported, exit_status)."""
+    found, rc = False, 0
+    for pkg, path, want in entries:
+        st = status(path, want)
+        if st == "UNREADABLE":
+            print(f"{path}: cannot read (run as root?)", file=sys.stderr)
+            rc = 1
+        elif st in ("MODIFIED", "PENDING"):
+            found = True
+            show_diff(pkg, path)
+        elif single:
+            found = True
+            what = "file is missing" if st == "MISSING" else "not modified"
+            print(f"{path}: {what} (package: {pkg})")
+    return found, rc
+
+
+def report_none(kind, entries):
+    if kind == "file":
+        print(f"{entries[0][1]}: not modified (package: {entries[0][0]})",
+              file=sys.stderr)
+    else:
+        print("No modified configuration files found.", file=sys.stderr)
+
+
+def main():
+    dirName, progName = os.path.split(sys.argv[0])
+    ap = argparse.ArgumentParser(
+        prog=progName,
+        description="List locally modified XBPS configuration files, or "
+                    "diff them against the latest version in the remote repo. "
+                    "Each argument may be an installed package or a "
+                    "configuration file; by default a package is listed and "
+                    "a file is diffed. With no arguments, all packages are "
+                    "listed (or diffed, with -d). Run as root so all of /etc "
+                    "is readable (no files will be modified). "
+                    "Diff requires an active network to retrieve the latest "
+                    "version (this may not be the same as the installed "
+                    "version!!) unless a pending .new-* file exists. "
+                    "An argument containing '/' is always treated as a file.")
+    ap.add_argument("-V", "--version", action="version",
+                    version=f"%(prog)s: " + TIME_STAMP)
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("-l", "--list", action="store_true",
+                      help="list the modified files of each PKG or FILE (the "
+                           "files that differ from the version recorded "
+                           "when the package was installed)")
+    mode.add_argument("-d", "--diff", action="store_true",
+                      help="diff each PKG or FILE against the most recent "
+                           "version in the (remote) repo; for a package, "
+                           "diff all of its modified files")
+    ap.add_argument("targets", nargs="*", metavar="PKG|FILE",
+                    help="installed package(s) and/or configuration "
+                         "file(s); default: all packages")
+    args = ap.parse_args()
+
+    rc = 0
+    for target in (args.targets or [None]):
+        r = resolve(target)
+        if r is None:
+            rc = 1
+            continue
+        kind, entries = r
+        if args.list:
+            diffing = False
+        elif args.diff:
+            diffing = True
+        else:
+            diffing = (kind == "file")      # DWIM
+
+        if diffing:
+            found, drc = do_diff(entries, kind == "file")
+            rc |= drc
+            if not found and not drc:
+                report_none(kind, entries)
+        elif not do_list(entries):
+            report_none(kind, entries)
+    sys.exit(rc)
+
+if __name__ == "__main__":
+    main()
+
+# Local variables:
+# mode: python
+# time-stamp-pattern: "4/TIME_STAMP=\"%Y%02m%02d.%02H%02M%02S\""
+# eval: (add-hook 'before-save-hook 'time-stamp)
+# End:
