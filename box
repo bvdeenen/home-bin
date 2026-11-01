@@ -2,9 +2,38 @@
 set -euo pipefail
 
 # --- SSH Agent Configuration ---
-TARGET_KEYS=(
-    "$HOME/.ssh/boxtest"
-)
+TARGET_KEYS=()
+
+# .box holds the TARGET_KEYS for this folder. Create it on first use.
+if [[ ! -e .box ]]; then
+    PRIVATE_KEYS=()
+    for f in "$HOME"/.ssh/*; do
+        if [[ -f "$f" ]] && grep -qs -- '^-----BEGIN .*PRIVATE KEY-----' "$f"; then
+            PRIVATE_KEYS+=("${f##*/}")
+        fi
+    done
+
+    if [[ ${#PRIVATE_KEYS[@]} -gt 0 ]]; then
+        SELECTED=$(printf '%s\n' "${PRIVATE_KEYS[@]}" |
+            fzf --multi --prompt='ssh keys for box> ' --header='TAB selects, ENTER confirms') || {
+            echo "No keys selected, not starting box" >&2
+            exit 1
+        }
+        {
+            echo 'TARGET_KEYS=('
+            while IFS= read -r name; do
+                printf '    "$HOME/.ssh/%s"\n' "$name"
+            done <<<"$SELECTED"
+            echo ')'
+        } >.box
+    else
+        echo "⚠️ No private keys in ~/.ssh, starting without an ssh agent" >&2
+    fi
+fi
+
+if [[ -e .box ]]; then
+    source ./.box
+fi
 
 SSH_AGENT_PID=""
 SSH_AUTH_SOCK_HOST=""
@@ -93,6 +122,10 @@ BWRAP=(bwrap
     --bind "$REPO" "$REPO"
     --chdir "$REPO"
 )
+# .box is sourced on the host, outside the sandbox, so the sandbox must not be able to change it.
+if [[ -e "$REPO/.box" ]]; then
+    BWRAP+=(--ro-bind "$REPO/.box" "$REPO/.box")
+fi
 # --- Expose the Isolated SSH Agent Socket ---
 if [[ -n "$SSH_AUTH_SOCK_HOST" && -S "$SSH_AUTH_SOCK_HOST" ]]; then
     # Bind the socket file from the host to an identical or unique path inside /tmp
