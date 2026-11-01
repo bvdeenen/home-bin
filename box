@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The sandbox gets this hostname from --hostname below. Unlike an environment
+# variable, it can't get lost in a child process.
+if [[ "$(</proc/sys/kernel/hostname)" == "sandbox" ]]; then
+    echo "⚠️ You are already inside a box, box can't be run inside a box" >&2
+    exit 1
+fi
+
+# The current folder is bound read-write, which would expose the whole home directory.
+if [[ "$(readlink -f .)" == "$(readlink -f "$HOME")" ]]; then
+    echo "box can't be run in \$HOME, it should only be run in a project directory" >&2
+    exit 1
+fi
+
 # --- SSH Agent Configuration ---
 TARGET_KEYS=()
 
