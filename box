@@ -2,7 +2,9 @@
 set -euo pipefail
 
 # --- SSH Agent Configuration ---
-TARGET_KEY="$HOME/.ssh/boxtest"
+TARGET_KEYS=(
+    "$HOME/.ssh/boxtest"
+)
 
 SSH_AGENT_PID=""
 SSH_AUTH_SOCK_HOST=""
@@ -19,27 +21,42 @@ cleanup() {
 
 trap cleanup EXIT
 
-if [[ -f "$TARGET_KEY" && -n "${SSH_AUTH_SOCK:-}" ]]; then
-    # Get the precise fingerprint of the target key
-    TARGET_FINGERPRINT=$(ssh-keygen -l -f "$TARGET_KEY" | awk '{print $2}')
-
-    # Unlock the key in your host/KDE agent first if it isn't there yet
-    if ! ssh-add -l | grep -qF "$TARGET_FINGERPRINT"; then
-        ssh-add "$TARGET_KEY"
+# Keys in the list that don't exist on this machine are skipped.
+EXISTING_KEYS=()
+for key in "${TARGET_KEYS[@]}"; do
+    if [[ -f "$key" ]]; then
+        EXISTING_KEYS+=("$key")
+    else
+        echo "⚠️ Skipping missing key $key" >&2
     fi
+done
+
+if [[ ${#EXISTING_KEYS[@]} -gt 0 && -n "${SSH_AUTH_SOCK:-}" ]]; then
+    # ssh-add -l exits non-zero when the agent is empty
+    HOST_AGENT_KEYS=$(ssh-add -l || true)
+
+    for key in "${EXISTING_KEYS[@]}"; do
+        # Get the precise fingerprint of the target key
+        TARGET_FINGERPRINT=$(ssh-keygen -l -f "$key" | awk '{print $2}')
+
+        # Unlock the key in your host/KDE agent first if it isn't there yet
+        if ! grep -qF "$TARGET_FINGERPRINT" <<<"$HOST_AGENT_KEYS"; then
+            ssh-add "$key"
+        fi
+    done
 
     # 2. Spin up the dedicated sandbox agent
     SOCKET_DIR=$(mktemp -d -t bwrap-ssh-agent.XXXXXXXX)
     SSH_AUTH_SOCK_HOST="$SOCKET_DIR/ssh-agent.sock"
     eval "$(ssh-agent -a "$SSH_AUTH_SOCK_HOST")" >/dev/null
 
-    echo "🔄 Loading $TARGET_KEY into sandbox agent..."
+    echo "🔄 Loading ${EXISTING_KEYS[*]} into sandbox agent..."
 
-    # 3. Load the key from its file into the sandbox agent. An agent never exports
-    # private keys, so it can't be copied from the host agent. Only the socket
-    # enters the sandbox, never the key file. ksshaskpass can get the passphrase from KWallet.
+    # 3. Load the keys from their files into the sandbox agent. An agent never exports
+    # private keys, so they can't be copied from the host agent. Only the socket
+    # enters the sandbox, never the key files. ksshaskpass can get the passphrases from KWallet.
     SSH_ASKPASS="${SSH_ASKPASS:-ksshaskpass}" SSH_ASKPASS_REQUIRE=prefer \
-        ssh-add "$TARGET_KEY" </dev/null
+        ssh-add "${EXISTING_KEYS[@]}" </dev/null
 fi
 
 # Export ALLOW_NET=0 to disable network access inside the sandbox.
