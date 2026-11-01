@@ -1,5 +1,11 @@
 declare -A HELP_TEXT
 
+HELP_TEXT[iatool - update]='iatool-update - git push and pull, restart on server '
+function iatool-update() {
+    git -C ~/dev/IntoAnimals/bc-tool push &&
+        ssh vds-ionos 'cd ~/bc-tool && git pull && sudo systemctl restart bc-tool.service'
+}
+
 HELP_TEXT[sdk]='sdk - The command line interface (CLI) for SDKMAN!
 
 SYNOPSIS

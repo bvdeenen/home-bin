@@ -153,6 +153,8 @@ HOME_RO_BINDS=(
     .cache/ms-playwright
     .cache/corepack
     .bashrc
+    .ssh/known_hosts
+    .ssh/config
     .gitignore
     binaries/zig/
     .nvm
