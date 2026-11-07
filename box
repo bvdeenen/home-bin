@@ -148,6 +148,16 @@ if [[ -n "$SSH_AUTH_SOCK_HOST" && -S "$SSH_AUTH_SOCK_HOST" ]]; then
     )
 fi
 
+# --- Expose the PulseAudio/PipeWire socket so paplay (the bell function) works ---
+# Note: this also gives the sandbox access to the microphone.
+PULSE_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse/native"
+if [[ -S "$PULSE_SOCK" ]]; then
+    BWRAP+=(
+        --bind "$PULSE_SOCK" /tmp/pulse-native
+        --setenv PULSE_SERVER unix:/tmp/pulse-native
+    )
+fi
+
 # --- Read-only system binds ---
 SYS_RO_BINDS=(
     # Folders with binaries and libraries.
