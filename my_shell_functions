@@ -9,7 +9,7 @@ function ipa() {
         printf("\n%-9s  ", arr[2]);
     }
     if(match($0, /([0-9]{1,3}\.)([0-9]{1,3}\.)([0-9]{1,3}\.)([0-9]{1,3})/, arr)) {
-        printf("%s", arr[0]);
+        printf("%s ", arr[0]);
     }
     
 }
