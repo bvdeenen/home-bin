@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 # The sandbox gets this hostname from --hostname below. Unlike an environment
 # variable, it can't get lost in a child process.
@@ -30,7 +29,7 @@ if [[ ! -e .box ]]; then
         SELECTED=$(printf '%s\n' "${PRIVATE_KEYS[@]}" |
             fzf --multi --prompt='ssh keys for box> ' --header='TAB selects, ENTER confirms') || {
             echo "No keys selected, not starting box" >&2
-            exit 1
+            # exit 1
         }
         {
             echo 'TARGET_KEYS=('
@@ -183,6 +182,7 @@ SYS_RO_BINDS=(
     /etc/java
     /usr/lib/jvm
     /usr/share/java
+    # Claude Desktop
 )
 
 BWRAP+=(--ro-bind-try /etc/ld.so.cache /etc/ld.so.cache)
@@ -216,7 +216,7 @@ HOME_RO_BINDS=(
     .config/plasma-workspace
     .local/share/claude
     .local/lib/node_modules
-    .local/lib/python3.13
+    .local/lib/python3.14
     .fonts
     .local/share/fonts
     .config/nvim
@@ -245,7 +245,9 @@ done
 # --- Home read-write binds ---
 HOME_RW_BINDS=(
     .local/share/nvim
+    .local/share/applications
     .claude
+    .claude-module
     .claude.json
     .grok
     .cache
@@ -271,10 +273,28 @@ BWRAP+=(--setenv PATH "$HOME/bin:$HOME/.local/bin:$HOME/binaries/zig:/usr/local/
 BWRAP+=(--setenv COLORTERM 1)
 BWRAP+=(--setenv USER "$USER")
 BWRAP+=(--setenv TERM xterm-color)
+BWRAP+=(--setenv DISPLAY "$DISPLAY")
+BWRAP+=(--setenv BROWSER "${BROWSER:-google-chrome-stable}")
+if [[ -n "$CLAUDE_CONFIG_DIR" ]]; then
+    BWRAP+=(--setenv CLAUDE_CONFIG_DIR "$CLAUDE_CONFIG_DIR")
+fi
+
+# --- X11 access: the socket folder plus the auth cookie ---
+# Any program with X11 access can read the keystrokes and screen of every
+# other X window, so this weakens the sandbox.
+BWRAP+=(--ro-bind-try /tmp/.X11-unix /tmp/.X11-unix)
+if [[ -n "${XAUTHORITY:-}" && -f "$XAUTHORITY" ]]; then
+    BWRAP+=(--ro-bind "$XAUTHORITY" /tmp/.Xauthority
+        --setenv XAUTHORITY /tmp/.Xauthority)
+elif [[ -f "$HOME/.Xauthority" ]]; then
+    BWRAP+=(--ro-bind "$HOME/.Xauthority" /tmp/.Xauthority
+        --setenv XAUTHORITY /tmp/.Xauthority)
+fi
 
 if [ -d "/tmp/claude-mcp-browser-bridge-${USER}" ]; then
     BWRAP+=(--bind "/tmp/claude-mcp-browser-bridge-${USER}" "/tmp/claude-mcp-browser-bridge-${USER}")
 fi
+BWRAP+=(--bind "/run/dbus/system_bus_socket" "/run/dbus/system_bus_socket")
 
 # Execute our big commandline and pass it
 # the rest of the arguments (the command to run).
