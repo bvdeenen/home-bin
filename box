@@ -212,6 +212,7 @@ HOME_RO_BINDS=(
     bin
     .local/bin
     .bashrc
+    .dotnet
     .bashrc.sandbox
     .config/plasma-workspace
     .local/share/claude
@@ -244,6 +245,7 @@ done
 
 # --- Home read-write binds ---
 HOME_RW_BINDS=(
+    .dotnet/corefx
     .local/share/nvim
     .local/share/applications
     .claude
@@ -269,15 +271,14 @@ for rel in "${HOME_TMP_OVERLAYS[@]}"; do
 done
 
 # Set up $PATH with the paths that we have inside this sandbox.
-BWRAP+=(--setenv PATH "$HOME/bin:$HOME/.local/bin:$HOME/binaries/zig:/usr/local/bin:/usr/bin:/bin")
+BWRAP+=(--setenv PATH "$HOME/bin:$HOME/.local/bin:$HOME/binaries/zig:/usr/local/bin:/usr/bin:/bin:$HOME/.dotnet:$HOME/.dotnet/tools")
 BWRAP+=(--setenv COLORTERM 1)
 BWRAP+=(--setenv USER "$USER")
 BWRAP+=(--setenv TERM xterm-color)
 BWRAP+=(--setenv DISPLAY "$DISPLAY")
 BWRAP+=(--setenv BROWSER "${BROWSER:-google-chrome-stable}")
-if [[ -n "$CLAUDE_CONFIG_DIR" ]]; then
-    BWRAP+=(--setenv CLAUDE_CONFIG_DIR "$CLAUDE_CONFIG_DIR")
-fi
+[[ -n $DOTNET_ROOT ]] && BWRAP+=(--setenv DOTNET_ROOT $DOTNET_ROOT)
+[[ -n "$CLAUDE_CONFIG_DIR" ]] && BWRAP+=(--setenv CLAUDE_CONFIG_DIR "$CLAUDE_CONFIG_DIR")
 
 # --- X11 access: the socket folder plus the auth cookie ---
 # Any program with X11 access can read the keystrokes and screen of every
