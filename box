@@ -218,9 +218,12 @@ HOME_RO_BINDS=(
     .local/share/claude
     .local/lib/node_modules
     .local/lib/python3.14
+    .local/lib/python3.13
     .fonts
     .local/share/fonts
     .config/nvim
+    .local/share/nvim
+    .local/share/applications
     .gitconfig
     .config/git
     .config/tmux
@@ -228,6 +231,7 @@ HOME_RO_BINDS=(
     .cache/corepack
     .bashrc
     .ssh/known_hosts
+    go
     .ssh/config
     .gitignore
     binaries/zig/
@@ -243,18 +247,14 @@ for rel in "${HOME_RO_BINDS[@]}"; do
     [[ -e "$HOME/$rel" ]] && BWRAP+=(--ro-bind "$HOME/$rel" "$HOME/$rel")
 done
 
+CLAUDE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+DOT_CLAUDE=${CLAUDE#"$HOME"}
 # --- Home read-write binds ---
 HOME_RW_BINDS=(
     .dotnet/corefx
-    .local/share/nvim
-    .local/share/applications
-    .claude
-    .claude-module
+    "$DOT_CLAUDE"
     .claude.json
-    .grok
     .cache
-    .config/gh
-    go
 )
 for rel in "${HOME_RW_BINDS[@]}"; do
     [[ -e "$HOME/$rel" ]] && BWRAP+=(--bind "$HOME/$rel" "$HOME/$rel")
