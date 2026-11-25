@@ -36,7 +36,7 @@ git-purge-broken() {
 	done < <(find . -name .git -prune -print0)
 }
 
-HELP_TEXT[git - clean - all]='find git directories and ask interactively for cleanup'
+HELP_TEXT['git-clean-all']='find git directories and ask interactively for cleanup'
 git-clean-all() {
 	local git_dir repo_dir reply
 
@@ -107,7 +107,7 @@ EOF
 	ip a | awk "$script"
 }
 
-HELP_TEXT[iatool - update]='iatool-update - git push and pull, restart on server '
+HELP_TEXT['iatool-update']='iatool-update - git push and pull, restart on server '
 function iatool-update() {
 	git -C ~/dev/IntoAnimals/bc-tool push &&
 		ssh ia2 'cd ~/bc-tool && git pull && sudo systemctl restart bc-tool.service'
@@ -126,7 +126,7 @@ DESCRIPTION
 '
 HELP_TEXT[br]='br (broot shell integration)'
 
-HELP_TEXT[find - most - recent]='find-most-recent
+HELP_TEXT['find-most-recent']='find-most-recent
 
 find the most recent file recursively from the cwd'
 function find-most-recent() {
@@ -241,7 +241,7 @@ function elevation() {
 	return $?
 }
 
-HELP_TEXT[fix - alphas]='fix-alphas <input.png> <output.png>
+HELP_TEXT['fix-alphas']='fix-alphas <input.png> <output.png>
 
 treshold alpha at 50%.
 Zig code https://github.com/bvdeenen/fix-alphas/tree/master'
@@ -249,7 +249,7 @@ function fix-alphas() {
 	~/binaries/fix-alphas "$@"
 }
 
-HELP_TEXT[check - alphas]='check-alphas # recursively finds pngs and checks alpha treshold'
+HELP_TEXT['check-alphas']='check-alphas # recursively finds pngs and checks alpha treshold'
 function check-alphas() {
 	py=$(
 		cat <<-'EOF'
@@ -289,7 +289,7 @@ function bitscope() {
 	)
 }
 
-HELP_TEXT[background - remover]='background-remover
+HELP_TEXT['background-remover']='background-remover
 
 remove the background from <file> and create a file with "no-bg" suffix'
 function background-remover() {
@@ -351,7 +351,7 @@ cb() {
 	fi
 }
 
-HELP_TEXT[convert - dvds]='convert-dvds
+HELP_TEXT['convert-dvds']='convert-dvds
 
 Convert all .VOB files below a certain directory (as argument)'
 function convert-dvds() {
@@ -375,7 +375,7 @@ function convert-dvds() {
 	set +x
 }
 
-HELP_TEXT[deb - extract]='deb-extract <deb-file>
+HELP_TEXT['deb-extract']='deb-extract <deb-file>
 
 Extract the data tarfile from a .deb file into a subdir with the base name of the deb file'
 function deb-extract() {
@@ -403,7 +403,7 @@ function deb-extract() {
 	tree $dname >/dev/stderr
 }
 
-HELP_TEXT[download - site]='download-site <url> [levels]
+HELP_TEXT['download-site']='download-site <url> [levels]
 
 Download a site (arg 1) with optional max number of levels'
 function download-site() {
@@ -427,7 +427,7 @@ function download-site() {
 		-erobots=off $1
 }
 
-HELP_TEXT[follow - symlinks]='follow-symlinks
+HELP_TEXT['follow-symlinks']='follow-symlinks
 
 Follow a symlink until its non-symlink root'
 function follow-symlinks() {
@@ -493,7 +493,7 @@ function bash-colors() {
 	)
 }
 
-HELP_TEXT[analyze - startup]='analyze-startup
+HELP_TEXT['analyze-startup']='analyze-startup
 
 Analyze the timing of ~/.bash-startup-log'
 function analyze-startup() {
@@ -508,7 +508,7 @@ function analyze-startup() {
 	done <~/.bash-startup-log
 }
 
-HELP_TEXT[git - find - branches]='git-find-branches
+HELP_TEXT['git-find-branches']='git-find-branches
 
 Find all git repos below cwd that are on non-master branches'
 function git-find-branches() {
@@ -524,7 +524,7 @@ function git-find-branches() {
 
 }
 
-HELP_TEXT[iptables - clear]='iptables-clear
+HELP_TEXT['iptables-clear']='iptables-clear
 
 set default iptables policies to let everything in'
 function iptables-clear() {
@@ -554,7 +554,7 @@ function iptables-clear() {
 	sudo iptables -X # delete all extra chains
 }
 
-HELP_TEXT[json - diff]='json-diff <file1> <file2>
+HELP_TEXT['json-diff']='json-diff <file1> <file2>
 
 Show the diff between two json files
 
@@ -584,7 +584,7 @@ function psg() {
 	ps aux | grep -i $@ | egrep -v "psg|grep"
 }
 
-HELP_TEXT[record - desktop]='record-desktop [filename:-recording.mkv]
+HELP_TEXT['record-desktop']='record-desktop [filename:-recording.mkv]
 
 record the desktop until ctrl-C. Optional filename argument'
 function record-desktop() {
@@ -592,7 +592,7 @@ function record-desktop() {
 	ffmpeg -f alsa -ac 1 -i default -f x11grab -r 15 -s 1366x768 -i :0.0 -vcodec mpeg4 "$filename"
 }
 
-HELP_TEXT[run - kst]='run-kst
+HELP_TEXT['run-kst']='run-kst
 
 run kst in a docker. Probably obsolete'
 function run-kst() {
@@ -603,7 +603,7 @@ function run-kst() {
 		-v /tmp/.X11-unix:/tmp/.X11-unix kst
 }
 
-HELP_TEXT[update - svlogj]='update-svlogj
+HELP_TEXT['update-svlogj']='update-svlogj
 
 Update svlogj to the newest version from github'
 function update-svlogj() {
@@ -615,7 +615,7 @@ function update-svlogj() {
 	~/bin/svlogj version >/dev/stderr
 }
 
-HELP_TEXT[shrink - photos]='shrink-photos <perc.> [file ...]
+HELP_TEXT['shrink-photos']='shrink-photos <perc.> [file ...]
 
 Shrink photos by a percentage'
 function shrink-photos() {
@@ -634,7 +634,7 @@ function shrink-photos() {
 	fi
 }
 
-HELP_TEXT[wait - for - file - to - stabilize]='wait-for-file-to-stabilize <file>
+HELP_TEXT['wait-for-file-to-stabilize']='wait-for-file-to-stabilize <file>
 
 Wait for file to stop changing'
 function wait-for-file-to-stabilize() {
@@ -665,7 +665,7 @@ function ansicolors() {
 	python -c "$py"
 }
 
-HELP_TEXT[docker - removecontainers]='docker-removecontainers
+HELP_TEXT['docker-removecontainers']='docker-removecontainers
 
 Stop and remove all containers'
 function docker-removecontainers() {
@@ -673,7 +673,7 @@ function docker-removecontainers() {
 	docker rm $(docker ps -aq)
 }
 
-HELP_TEXT[docker - armageddon]='docker-armageddon
+HELP_TEXT['docker-armageddon']='docker-armageddon
 
 Remove everything from docker: containers, networks, images, volumes'
 function docker-armageddon() {
@@ -801,3 +801,4 @@ function _Help_auto_complete() {
 complete -F _Help_auto_complete Help
 
 # vim:ft=bash
+# @fmt:off
