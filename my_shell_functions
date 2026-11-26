@@ -1,7 +1,7 @@
 declare -A HELP_TEXT
 
 HELP_TEXT['git-purge-broken']='find broken git repos and interactively asks to wipe them'
-git-purge-broken() {
+git-purge-broken() (
 	local git_dir repo_dir status_out remote_url last_mod reply
 
 	while IFS= read -r -d '' git_dir; do
@@ -10,6 +10,11 @@ git-purge-broken() {
 		# Check if git recognizes the repo and has a valid HEAD commit
 		if status_out=$(git -C "$repo_dir" rev-parse --verify HEAD 2>&1); then
 			# Healthy repository -> skip
+			continue
+		fi
+		# A valid repo without any commits yet (fresh git init) is not broken
+		if git -C "$repo_dir" symbolic-ref -q HEAD >/dev/null 2>&1 &&
+			[[ -z "$(git -C "$repo_dir" for-each-ref 2>/dev/null)" ]]; then
 			continue
 		fi
 
@@ -22,10 +27,10 @@ git-purge-broken() {
 		printf 'Remote:   %s\n' "$remote_url"
 		printf 'Modified: %s\n' "$last_mod"
 
-		# Default to Yes on Enter
-		read -r -p "Delete entire directory '$repo_dir'? [Y/n] " reply </dev/tty
+		# Default to No on Enter
+		read -r -p "Delete entire directory '$repo_dir'? [y/N] " reply </dev/tty
 		case "$reply" in
-		"" | [Yy] | [Yy][Ee][Ss])
+		[Yy] | [Yy][Ee][Ss])
 			rm -rf -- "$repo_dir"
 			echo "Deleted '$repo_dir'."
 			;;
@@ -34,62 +39,66 @@ git-purge-broken() {
 			;;
 		esac
 	done < <(find . -name .git -prune -print0)
-}
+)
 
 HELP_TEXT['git-clean-all']='find git directories and ask interactively for cleanup'
 git-clean-all() {
-	local git_dir repo_dir reply
+	(
+		local git_dir repo_dir reply
 
-	while IFS= read -r -d '' git_dir; do
-		repo_dir="$(dirname "$git_dir")"
-		printf '\n=== Repository: %s ===\n' "$repo_dir"
+		while IFS= read -r -d '' git_dir; do
+			repo_dir="$(dirname "$git_dir")"
+			printf '\n=== Repository: %s ===\n' "$repo_dir"
 
-		# Preview what git clean -xdf would remove
-		if [[ -z "$(git -C "$repo_dir" clean -xdn)" ]]; then
-			echo "Nothing to clean."
-			continue
-		fi
+			# Preview what git clean -xdf would remove
+			if [[ -z "$(git -C "$repo_dir" clean -xdn)" ]]; then
+				echo "Nothing to clean."
+				continue
+			fi
 
-		git -C "$repo_dir" clean -xdn
+			git -C "$repo_dir" clean -xdn
 
-		while true; do
-			read -r -p "Clean '$repo_dir'? [y]es / [e]xclude .env* / [N]o: " reply </dev/tty
-			case "$reply" in
-			[Yy])
-				git -C "$repo_dir" clean -xdf
-				break
-				;;
-			[Ee])
-				echo "--- Preview keeping .env* files ---"
-				if [[ -z "$(git -C "$repo_dir" clean -xdn -e '.env*')" ]]; then
-					echo "Nothing left to clean after excluding .env*."
+			while true; do
+				read -r -p "Clean '$repo_dir'? [y]es / [e]xclude .env* / [N]o: " reply </dev/tty
+				case "$reply" in
+				[Yy])
+					git -C "$repo_dir" clean -xdf
 					break
-				fi
-				git -C "$repo_dir" clean -xdn -e '.env*'
-				read -r -p "Proceed with cleaning (keeping .env*)? [y/N]: " reply </dev/tty
-				if [[ "$reply" =~ ^[Yy]$ ]]; then
-					git -C "$repo_dir" clean -xdf -e '.env*'
-				else
+					;;
+				[Ee])
+					echo "--- Preview keeping .env* files ---"
+					if [[ -z "$(git -C "$repo_dir" clean -xdn -e '.env*')" ]]; then
+						echo "Nothing left to clean after excluding .env*."
+						break
+					fi
+					git -C "$repo_dir" clean -xdn -e '.env*'
+					read -r -p "Proceed with cleaning (keeping .env*)? [y/N]: " reply </dev/tty
+					if [[ "$reply" =~ ^[Yy]$ ]]; then
+						git -C "$repo_dir" clean -xdf -e '.env*'
+					else
+						echo "Skipped."
+					fi
+					break
+					;;
+				"" | [Nn])
 					echo "Skipped."
-				fi
-				break
-				;;
-			"" | [Nn])
-				echo "Skipped."
-				break
-				;;
-			*)
-				echo "Please enter y, e, or n."
-				;;
-			esac
-		done
-	done < <(find . -name .git -prune -print0)
+					break
+					;;
+				*)
+					echo "Please enter y, e, or n."
+					;;
+				esac
+			done
+		done < <(find . -name .git -prune -print0)
+	)
 }
 
 HELP_TEXT[ipa]='shows network interfaces with ipv4 addresses'
 function ipa() {
-	local script=$(
-		cat <<'EOF'
+	(
+		local script
+		script=$(
+			cat <<'EOF'
 {
     if(match($0, /^([0-9]+): ([0-9a-z]+).*/, arr)) {
         printf("\n%-9s  ", arr[2]);
@@ -103,8 +112,9 @@ END {
     printf("\n");
 }
 EOF
+		)
+		ip a | awk "$script"
 	)
-	ip a | awk "$script"
 }
 
 HELP_TEXT['iatool-update']='iatool-update - git push and pull, restart on server '
@@ -130,7 +140,7 @@ HELP_TEXT['find-most-recent']='find-most-recent
 
 find the most recent file recursively from the cwd'
 function find-most-recent() {
-	ls -l $(find . -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -f2- -d" ")
+	find . -type f -printf '%T@ %p\0' | sort -zn | tail -zn1 | cut -z -f2- -d" " | xargs -0r ls -l
 }
 
 HELP_TEXT['scan-lan']='scan-lan
@@ -138,12 +148,15 @@ HELP_TEXT['scan-lan']='scan-lan
 Scan the lan via avahi-browse'
 
 function scan-lan() {
-	local script=$(
-		cat <<-'EOF'
-			        $1=="=" && $8!="" && $3=="IPv4" {printf "%-16s %-6s %-30s %s\n",$8,$9,$7, $4}
-		EOF
+	(
+		local script
+		script=$(
+			cat <<-'EOF'
+				        $1=="=" && $8!="" && $3=="IPv4" {printf "%-16s %-6s %-30s %s\n",$8,$9,$7, $4}
+			EOF
+		)
+		avahi-browse -rtpa | awk -F';' "$script" | sort -u
 	)
-	avahi-browse -rtpa | awk -F';' "$script" | sort -u
 }
 
 HELP_TEXT[latlon2utm]='latlon2utm
@@ -156,7 +169,7 @@ function latlon2utm() {
 HELP_TEXT[pdfcat]='pdfcat [-o/-O <output-file>] [input-file...]
 
 Concatenate input pdf files into output-file (default output.pdf). Use -O to overwrite '
-pdfcat() {
+pdfcat() (
 	local OPTIND # VERY important, won't work otherwise!!
 	local OUTFILE="output.pdf"
 	local OVERWRITE=0
@@ -168,6 +181,10 @@ pdfcat() {
 			OUTFILE="$OPTARG"
 			OVERWRITE=1
 			;;
+		*)
+			echo "don't understand $ARG"
+			exit 1
+			;;
 		esac
 	done
 	shift $((OPTIND - 1))
@@ -175,21 +192,21 @@ pdfcat() {
 	# If no input files were given
 	if (($# == 0)); then
 		echo "Error: No input PDF files provided" >&2
-		return 1
+		exit 1
 	fi
 
 	# Check all inputs exist
 	for f in "$@"; do
 		if [[ ! -f "$f" ]]; then
 			echo "Input file not found: $f" >&2
-			return 1
+			exit 1
 		fi
 	done
 
 	# Check output / overwrite logic
 	if [[ $OVERWRITE -eq 0 && -f "$OUTFILE" ]]; then
 		printf >&2 "Won't overwrite existing '%s'. Use -O to force overwrite.\n" "$OUTFILE"
-		return 1
+		exit 1
 	fi
 
 	local verb="Creating"
@@ -198,24 +215,22 @@ pdfcat() {
 
 	# The actual merge — note the -- at the end is important
 	qpdf --empty --pages "$@" -- "$OUTFILE"
-}
+)
 
 HELP_TEXT[barcode]='barcode [string]
 
 Uses zint to generate a barcode from the argument or clipboard'
-function barcode() {
-	(
-		local b=${1:-$(xclip -o)} # parameter or clipboard
-		b=${b//\"/}               # strip quotes
-		if [[ $b == "" ]]; then
-			echo "argument is empty"
-			exit 1
-		fi
-		zint --notext -d "$b"
-		echo "Created out.png" >&2
-	)
-	return $?
-}
+function barcode() (
+	local b
+	b=${1:-$(xclip -o)} # parameter or clipboard
+	b=${b//\"/}         # strip quotes
+	if [[ $b == "" ]]; then
+		echo "argument is empty"
+		exit 1
+	fi
+	zint --notext -d "$b"
+	echo "Created out.png" >&2
+)
 
 isfloat() { printf '%f' "$1" &>/dev/null; }
 
@@ -223,23 +238,21 @@ HELP_TEXT[elevation]='elevation [lat, lon]
 
 Queries open-meteo.com to get elevation. Takes value from clipboard when parameter is absent.
 Parameter is comma separated lat,lon pair (like google maps)'
-function elevation() {
-	(
-		latlon=${1:-$(xclip -o)} # parameter or clipboard
-		latlon=${latlon//\"/}    # strip quotes
-		IFS=', ' read lat lon <<<$latlon
-		if ! isfloat "$lat"; then
-			echo "lat:$lat is not a float"
-			exit 1
-		fi
-		if ! isfloat "$lon"; then
-			echo "lon:$lon is not a float"
-			exit 1
-		fi
-		curl -s "https://api.open-meteo.com/v1/elevation?latitude=$lat&longitude=$lon" | jq -r .elevation[0]
-	)
-	return $?
-}
+function elevation() (
+	local latlon
+	latlon=${1:-$(xclip -o)} # parameter or clipboard
+	latlon=${latlon//\"/}    # strip quotes
+	IFS=', ' read -r lat lon <<<"$latlon"
+	if ! isfloat "$lat"; then
+		echo "lat:$lat is not a float"
+		exit 1
+	fi
+	if ! isfloat "$lon"; then
+		echo "lon:$lon is not a float"
+		exit 1
+	fi
+	curl -s "https://api.open-meteo.com/v1/elevation?latitude=$lat&longitude=$lon" | jq -r .elevation[0]
+)
 
 HELP_TEXT['fix-alphas']='fix-alphas <input.png> <output.png>
 
@@ -250,55 +263,57 @@ function fix-alphas() {
 }
 
 HELP_TEXT['check-alphas']='check-alphas # recursively finds pngs and checks alpha treshold'
-function check-alphas() {
+function check-alphas() (
 	py=$(
 		cat <<-'EOF'
-			        import sys
-			        import numpy as np
-			        from glob import glob
-			        import matplotlib.pyplot as plt
+			import sys
+			import numpy as np
+			from glob import glob
+			import matplotlib.pyplot as plt
 
-			        for f in glob("**/*.png", recursive=True):
-			            try:
-			                img = plt.imread(f)
-			                h,w,pix = img.shape
-			            except Exception as e:
-			                print("\033[0;31m", f, e, "\033[0m")
-			                continue
-			            if pix == 4:
-			                alphas = img[:,:,3].flatten()
-			                hist = np.histogram(alphas, bins=256)[0]
-			                ok = hist[1:-1].sum() == 0
-			            else:
-			                ok = True
-			            symbol = "✓" if ok else "\u26A0"
-			            print(symbol, "w:", w, "h:", h, f)
+			for f in glob("**/*.png", recursive=True):
+			    try:
+			        img = plt.imread(f)
+			        h,w,pix = img.shape
+			    except Exception as e:
+			        print("\033[0;31m", f, e, "\033[0m")
+			        continue
+			    if pix == 4:
+			        alphas = img[:,:,3].flatten()
+			        hist = np.histogram(alphas, bins=256)[0]
+			        ok = hist[1:-1].sum() == 0
+			    else:
+			        ok = True
+			    symbol = "✓" if ok else "\u26A0"
+			    print(symbol, "w:", w, "h:", h, f)
 		EOF
 	)
 	python -c "$py"
-}
+)
 
 HELP_TEXT[bitscope]='bitscope
 
 start bitscope application'
-function bitscope() {
-	(
-		set -e
-		cd ~/binaries/bitscope-dso_2.6.EA17H_amd64/
-		./usr/bin/start-bitscope-dso
-	)
-}
+function bitscope() (
+	set -e
+	cd ~/binaries/bitscope-dso_2.6.EA17H_amd64/
+	./usr/bin/start-bitscope-dso
+)
 
 HELP_TEXT['background-remover']='background-remover
 
-remove the background from <file> and create a file with "no-bg" suffix'
-function background-remover() {
-	[[ ! -f $1 ]] && return 1
+remove the background from <file> and create a file with "-wo-bg.png" suffix'
+function background-remover() (
+	if [[ ! -f $1 ]]; then
+		echo "Usage: background-remover <file>" >&2
+		exit 1
+	fi
+	local out
 	out="${1%.*}-wo-bg.png"
 	id=$(notify-send -t 30000 -a background-remover --print-id "removing background from $1. Creating $out.")
 	backgroundremover -i "$1" -o "$out"
-	notify-send -a background-remover --replace-id $id "Done"
-}
+	notify-send -a background-remover --replace-id "$id" "Done"
+)
 
 function az() {
 	PYTHONPATH=~/lib/azure-cli ~/lib/azure-cli/bin/python -m azure.cli "$@"
@@ -308,8 +323,8 @@ HELP_TEXT[cb2png]='cb2png
 
 copy clipboard into png file. Optional filename arg.'
 function cb2png() {
-	image=${1:-clipboard.png}
-	xclip -selection clipboard -t image/png -o >$image
+	local image=${1:-clipboard.png}
+	xclip -selection clipboard -t image/png -o >"$image"
 }
 
 HELP_TEXT[cb]='cb [text ...]
@@ -322,6 +337,7 @@ cb() {
 	local _scs_col="\e[0;32m"
 	local _wrn_col='\e[1;31m'
 	local _trn_col='\e[0;33m'
+	local input
 	# Check that xclip is installed.
 	if ! type xclip >/dev/null 2>&1; then
 		echo -e "$_wrn_col""You must have the 'xclip' program installed.\e[0m"
@@ -344,7 +360,7 @@ cb() {
 			# Copy input to clipboard
 			echo -n "$input" | xclip -selection c
 			# Truncate text for status
-			if [ ${#input} -gt 80 ]; then input="$(echo $input | cut -c1-80)$_trn_col...\e[0m"; fi
+			if [ ${#input} -gt 80 ]; then input="$(echo "$input" | cut -c1-80)$_trn_col...\e[0m"; fi
 			# Print status.
 			echo -e "$_scs_col""Copied to clipboard:\e[0m $input"
 		fi
@@ -354,31 +370,30 @@ cb() {
 HELP_TEXT['convert-dvds']='convert-dvds
 
 Convert all .VOB files below a certain directory (as argument)'
-function convert-dvds() {
+function convert-dvds() (
 
 	if [[ -z $1 ]]; then
-		echo "Usage: $0 <dir-name>"
-		return 1
+		echo "Usage: convert-dvds <dir-name>"
+		exit 1
+	fi
+	if [[ ! -d $1 ]]; then
+		echo "$1 is not a directory"
+		exit 1
 	fi
 	name=$(basename "$1")
-	if [[ ! -d $name ]]; then
-		echo "$name is not a directory"
-		return 1
-	fi
 
 	set -x
-	t=$(mktemp).vob
-	rm -f $t
-	cat "${1}"/VIDEO_TS/*.VOB >$t
-	ffmpeg -i $t -c:v libx264 "${name}.mp4"
-	rm $t
+	t=$(mktemp --suffix=.vob)
+	cat "${1}"/VIDEO_TS/*.VOB >"$t"
+	ffmpeg -i "$t" -c:v libx264 "${name}.mp4"
+	rm "$t"
 	set +x
-}
+)
 
 HELP_TEXT['deb-extract']='deb-extract <deb-file>
 
 Extract the data tarfile from a .deb file into a subdir with the base name of the deb file'
-function deb-extract() {
+function deb-extract() (
 	local debfile=$1
 	if [[ ! -f $debfile ]]; then
 		echo "deb-extract <deb-file>"
@@ -386,121 +401,126 @@ function deb-extract() {
 	fi
 	dname=${debfile%.deb}
 	[[ -d $dname ]] || (
-		mkdir $dname
+		mkdir "$dname"
 		echo "Created $dname" >/dev/stderr
 	)
-	ar t $1 | grep -q data.tar.gz
-	if [[ $? -eq 0 ]]; then
-		ar p "$debfile" data.tar.gz | tar -C $dname -xzf -
-	else
-		ar t $1 | grep -q data.tar.xz
-		if [[ $? -eq 0 ]]; then
-			ar p "$debfile" data.tar.xz | tar -C $dname -xJf -
-		else
-			echo "Don't know what to do with this debian file" >/dev/stderr
-		fi
-	fi
-	tree $dname >/dev/stderr
-}
+	local member
+	member=$(ar t "$debfile" | grep -m1 '^data\.tar')
+	case "$member" in
+	data.tar.gz) ar p "$debfile" "$member" | tar -C "$dname" -xzf - ;;
+	data.tar.xz) ar p "$debfile" "$member" | tar -C "$dname" -xJf - ;;
+	data.tar.zst) ar p "$debfile" "$member" | tar -C "$dname" --zstd -xf - ;;
+	data.tar.bz2) ar p "$debfile" "$member" | tar -C "$dname" -xjf - ;;
+	data.tar) ar p "$debfile" "$member" | tar -C "$dname" -xf - ;;
+	*)
+		echo "Don't know what to do with this debian file" >/dev/stderr
+		return 1
+		;;
+	esac
+	tree "$dname" >/dev/stderr
+)
 
 HELP_TEXT['download-site']='download-site <url> [levels]
 
 Download a site (arg 1) with optional max number of levels'
-function download-site() {
-	if [[ -z $1 || $2 && ! $2 =~ ^[0-9]+ ]]; then
+function download-site() (
+	if [[ -z $1 || $2 && ! $2 =~ ^[0-9]+$ ]]; then
 		echo "download-site <url> [level]"
-		return 1
+		exit 1
 	fi
-	if [[ $2 ]]; then
-		level="--level=$2"
-	else
-		level=""
-	fi
+	local opts=()
+	[[ $2 ]] && opts+=("--level=$2")
 	wget --recursive \
 		--no-clobber \
 		--convert-links \
 		--adjust-extension \
-		--html-extension \
-		-U Mozilla $level --ignore-length \
+		-U Mozilla "${opts[@]}" --ignore-length \
 		--page-requisites \
 		--restrict-file-names=ascii \
-		-erobots=off $1
-}
+		-erobots=off "$1"
+)
 
 HELP_TEXT['follow-symlinks']='follow-symlinks
 
 Follow a symlink until its non-symlink root'
-function follow-symlinks() {
+function follow-symlinks() (
 	file=$1
 	if [[ ! -L "$file" ]]; then
 		echo "use follow-symlinks <symlink>"
-		return 1
+		exit 1
 	fi
 
 	echo "Following symlink $file"
-	while true; do
-		#echo -n "$file"
-		f=$(readlink -n $file)
-		if [[ $? == 0 ]]; then
-			echo "symlinks to $f"
-			file=$f
-		else
-			echo "reached real file: $file"
-			return 0
+	local -A seen=()
+	local f
+	while [[ -L "$file" ]]; do
+		if [[ ${seen[$file]} ]]; then
+			echo "symlink loop detected at $file" >&2
+			exit 1
 		fi
+		seen[$file]=1
+		f=$(readlink -n "$file")
+		# relative targets are relative to the directory containing the link
+		[[ $f != /* ]] && f="$(dirname "$file")/$f"
+		echo "symlinks to $f"
+		file=$f
 	done
-}
+	if [[ -e "$file" ]]; then
+		echo "reached real file: $(realpath "$file")"
+	else
+		echo "dangling symlink, target does not exist: $file" >&2
+		exit 1
+	fi
+)
 
 HELP_TEXT['bash-colors']='bash-colors
 
 This function echoes a bunch of color codes to the 
-terminal to demonstrate what''s available.  Each 
+terminal to demonstrate what is available.  Each 
 line is the color code of one forground color,
 out of 17 (default + 16 escapes), followed by a 
 test use of that color on all nine background 
 colors (default + 8 escapes).'
-function bash-colors() {
-	(
+function bash-colors() (
 
-		echo "See https://misc.flogisoft.com/bash/tip_colors_and_formatting"
-		T='gYw' # The test text
+	echo "See https://misc.flogisoft.com/bash/tip_colors_and_formatting"
+	T='gYw' # The test text
 
-		echo -e "\n                 40m     41m     42m     43m     44m     45m     46m     47m"
+	echo -e "\n                 40m     41m     42m     43m     44m     45m     46m     47m"
 
-		for FGs in '    m' '   1m' '  30m' '1;30m' '  31m' '1;31m' '  32m' \
-			'1;32m' '  33m' '1;33m' '  34m' '1;34m' '  35m' '1;35m' \
-			'  36m' '1;36m' '  37m' '1;37m'; do
-			FG=${FGs// /}
-			echo -en " $FGs \033[$FG  $T  "
-			for BG in 40m 41m 42m 43m 44m 45m 46m 47m; do
-				echo -en "$EINS \033[$FG\033[$BG  $T  \033[0m"
-			done
-			echo
+	for FGs in '    m' '   1m' '  30m' '1;30m' '  31m' '1;31m' '  32m' \
+		'1;32m' '  33m' '1;33m' '  34m' '1;34m' '  35m' '1;35m' \
+		'  36m' '1;36m' '  37m' '1;37m'; do
+		FG=${FGs// /}
+		echo -en " $FGs \033[$FG  $T  "
+		for BG in 40m 41m 42m 43m 44m 45m 46m 47m; do
+			echo -en " \033[$FG\033[$BG  $T  \033[0m"
 		done
+		echo
+	done
 
-		for fgbg in 38 48; do      # Foreground / Background
-			for color in {0..255}; do # Colors
-				# Display the color
-				printf "\e[${fgbg};5;%sm  %3s  \e[0m" $color $color
-				# Display 6 colors per lines
-				if [ $((($color + 1) % 16)) == 0 ]; then
-					echo # New line
-				fi
-			done
-			echo # New line
+	for fgbg in 38 48; do      # Foreground / Background
+		for color in {0..255}; do # Colors
+			# Display the color
+			printf "\e[${fgbg};5;%sm  %3s  \e[0m" "$color" "$color"
+			# Display 6 colors per lines
+			if [ $(((color + 1) % 16)) == 0 ]; then
+				echo # New line
+			fi
 		done
+		echo # New line
+	done
 
-	)
-}
+)
 
 HELP_TEXT['analyze-startup']='analyze-startup
 
 Analyze the timing of ~/.bash-startup-log'
 function analyze-startup() {
-	local t_old
+	local t_old line t what
 	t_old=-1
 	while read -r line; do
-		read -r t what <<<$line
+		read -r t what <<<"$line"
 		if ((t_old != -1)); then
 			printf "%03d ms. %s\n" $((t - t_old)) "$what"
 		fi
@@ -513,11 +533,11 @@ HELP_TEXT['git-find-branches']='git-find-branches
 Find all git repos below cwd that are on non-master branches'
 function git-find-branches() {
 	find . -type d -name .git |
-		while read d; do
-			cd $(dirname $d)
+		while read -r d; do
+			cd "$(dirname "$d")"
 			branch=$(git branch --show-current)
 			if [[ $branch != "master" && $branch != "main" ]]; then
-				echo $PWD $branch
+				echo "$PWD" "$branch"
 			fi
 			cd - >/dev/null
 		done
@@ -527,7 +547,7 @@ function git-find-branches() {
 HELP_TEXT['iptables-clear']='iptables-clear
 
 set default iptables policies to let everything in'
-function iptables-clear() {
+function iptables-clear() (
 
 	sudo ip6tables --policy INPUT ACCEPT
 	sudo ip6tables --policy OUTPUT ACCEPT
@@ -552,18 +572,20 @@ function iptables-clear() {
 	sudo iptables -Z # zero counters
 	sudo iptables -F # flush (delete) rules
 	sudo iptables -X # delete all extra chains
-}
+)
 
 HELP_TEXT['json-diff']='json-diff <file1> <file2>
 
 Show the diff between two json files
 
 gron: https://github.com/tomnomnom/gron'
-function json-diff() {
-	GRON=gron
-	DIFF=diff
+function json-diff() (
+	local GRON
+	local DIFF
+	GRON="gron"
+	DIFF="diff"
 	# colordiff: https://www.colordiff.org
-	COLORDIFF=colordiff
+	COLORDIFF="colordiff"
 
 	# use colordiff in interactive mode, diff otherwise
 	if [ -t 1 ]; then
@@ -574,70 +596,81 @@ function json-diff() {
 
 	LOCAL="$1"
 	REMOTE="$2"
-	"${DIFFER}" -u --label "a/$REMOTE" --label "b/$REMOTE" <("$GRON" <"$LOCAL") <("$GRON" <"$REMOTE") | less -R
-}
+	"${DIFFER}" -u --label "a/$LOCAL" --label "b/$REMOTE" <("$GRON" <"$LOCAL") <("$GRON" <"$REMOTE") | less -R
+)
 
 HELP_TEXT[psg]='psg
 
 grep in the processes list'
-function psg() {
-	ps aux | grep -i $@ | egrep -v "psg|grep"
-}
+function psg() (
+	pgrep -ai -- "$1"
+)
 
 HELP_TEXT['record-desktop']='record-desktop [filename:-recording.mkv]
 
 record the desktop until ctrl-C. Optional filename argument'
-function record-desktop() {
-	local filename=${1:-recording.mkv}
-	ffmpeg -f alsa -ac 1 -i default -f x11grab -r 15 -s 1366x768 -i :0.0 -vcodec mpeg4 "$filename"
-}
+function record-desktop() (
+	local filename size
+	filename=${1:-recording.mkv}
+	size=$(xdpyinfo | awk '/dimensions:/ {print $2; exit}')
+	ffmpeg -f alsa -ac 1 -i default -f x11grab -r 15 -s "$size" -i "${DISPLAY:-:0.0}" -vcodec mpeg4 "$filename"
+)
 
 HELP_TEXT['run-kst']='run-kst
 
 run kst in a docker. Probably obsolete'
-function run-kst() {
-	xhost +
+function run-kst() (
+	xhost +local: >/dev/null
+	trap 'xhost -local: >/dev/null' EXIT
 	docker run -ti --rm \
-		-v $PWD:/home/developer/data \
-		-e DISPLAY=$DISPLAY \
+		-v "$PWD":/home/developer/data \
+		-e DISPLAY="$DISPLAY" \
 		-v /tmp/.X11-unix:/tmp/.X11-unix kst
-}
+)
 
 HELP_TEXT['update-svlogj']='update-svlogj
 
 Update svlogj to the newest version from github'
-function update-svlogj() {
-	local url
+function update-svlogj() (
 	RELEASE_API_URL="https://api.github.com/repos/bvdeenen/svlogj/releases/latest"
 	TARBALL_URL=$(curl --silent "$RELEASE_API_URL" | jq --raw-output '.assets[0].browser_download_url')
-	echo $TARBALL_URL >/dev/stderr
-	curl --silent --location $TARBALL_URL --output - | tar xz -C ~/bin
+	echo "$TARBALL_URL" >/dev/stderr
+	curl --silent --location "$TARBALL_URL" --output - | tar xz -C ~/bin
 	~/bin/svlogj version >/dev/stderr
-}
+)
 
 HELP_TEXT['shrink-photos']='shrink-photos <perc.> [file ...]
 
 Shrink photos by a percentage'
-function shrink-photos() {
+function shrink-photos() (
 	local percent=$1
-	if [[ "$percent" =~ ^[1-9][0-9]$ ]] && ((percent >= 10 && percent <= 99)); then
+	if [[ "$percent" =~ ^[1-9][0-9]$ ]]; then
 		shift
-		while [ ! -z "$1" ]; do
-			bak="${1%.*}_bak.${1##*.}"
-			mv "$1" "$bak"
-			magick "$bak" -scale ${percent}% "$1"
-			shift
+		local f bak
+		for f in "$@"; do
+			bak="${f%.*}_bak.${f##*.}"
+			if [[ -e "$bak" ]]; then
+				echo "Skipping $f: backup $bak already exists" >&2
+				continue
+			fi
+			if magick "$f" -scale "${percent}%" "$f.tmp.${f##*.}"; then
+				mv "$f" "$bak"
+				mv "$f.tmp.${f##*.}" "$f"
+			else
+				echo "Failed to shrink $f, left untouched" >&2
+				rm -f "$f.tmp.${f##*.}"
+			fi
 		done
 	else
 		echo "Use shrink-photos <percentage> [file ...]"
 		return 1
 	fi
-}
+)
 
 HELP_TEXT['wait-for-file-to-stabilize']='wait-for-file-to-stabilize <file>
 
 Wait for file to stop changing'
-function wait-for-file-to-stabilize() {
+function wait-for-file-to-stabilize() (
 	FILE="$1"
 	if [ ! -f "$FILE" ]; then
 		echo "Usage: wait-for-file-to-stabilize <file>"
@@ -647,7 +680,7 @@ function wait-for-file-to-stabilize() {
 	while [ $(($(date +%s) - $(stat -c %Y "$FILE"))) -lt 10 ]; do
 		sleep 1
 	done
-}
+)
 
 HELP_TEXT[ansicolors]='ansicolors
 show all ansi colors between 0 and 255'
@@ -669,8 +702,8 @@ HELP_TEXT['docker-removecontainers']='docker-removecontainers
 
 Stop and remove all containers'
 function docker-removecontainers() {
-	docker stop $(docker ps -aq)
-	docker rm $(docker ps -aq)
+	docker ps -aq | xargs -r docker stop
+	docker ps -aq | xargs -r docker rm
 }
 
 HELP_TEXT['docker-armageddon']='docker-armageddon
@@ -679,48 +712,50 @@ Remove everything from docker: containers, networks, images, volumes'
 function docker-armageddon() {
 	docker-removecontainers
 	docker network prune -f
-	docker rmi -f $(docker images --filter dangling=true -qa)
-	docker volume rm $(docker volume ls --filter dangling=true -q)
-	docker rmi -f $(docker images -qa)
+	docker images --filter dangling=true -qa | xargs -r docker rmi -f
+	docker volume ls --filter dangling=true -q | xargs -r docker volume rm
+	docker images -qa | xargs -r docker rmi -f
 }
 
 HELP_TEXT[tnew]='tnew
 
 Create a tmux session, or attach to an existing one named basename(dir)'
 function tnew() {
-	direnv exec / tmux new-session -As $(basename $PWD)
+	local name
+	name=$(basename "$PWD")
+	direnv exec / tmux new-session -As "${name//[.:]/_}"
 }
 
 function op() {
-	op=$(which op)
 	if [[ $1 == "signin" ]]; then
-		eval $($op "$@")
+		eval "$(command op "$@")"
 	else
-		$op "$@"
+		command op "$@"
 	fi
 }
 
 HELP_TEXT[xbld]='xbld [void-packages dir (~/void-packages)]
 
 Interactive single-select builder/installer for restricted packages using fzf + bat preview '
-function xbld() {
-	local dir="${1:-$HOME/void-packages}"
+function xbld() (
+	local dir
+	dir="${1:-$HOME/void-packages}"
 
 	if [[ ! -d "$dir/srcpkgs" ]]; then
 		echo "Error: $dir does not look like a void-packages tree" >&2
-		return 1
+		exit 1
 	fi
 	(
 		set -e
-		cd "$dir" || exit 1
+		cd "$dir" || return 1
 		git pull --rebase
 
 		# Collect restricted package names cleanly
 		local pkgs
 		pkgs=$(
-			shopt -s extglob nullglob
-			cd srcpkgs 2>/dev/null || exit 1
-			grep -l '^restricted=yes' **/template 2>/dev/null |
+			shopt -s nullglob
+			cd srcpkgs 2>/dev/null || return 1
+			grep -l '^restricted=yes' -- */template 2>/dev/null |
 				awk -F/ '{print $1}' |
 				sort -u
 		)
@@ -732,18 +767,18 @@ function xbld() {
 
 		# fzf single select with bat preview
 		local selection
+		# shellcheck disable=SC2016 # $PWD/$p are expanded by fzf's preview shell
 		selection=$(
 			echo "$pkgs" | fzf \
 				--height 60% \
 				--layout=reverse \
 				--border \
 				--prompt="Select restricted package to build+install → " \
-				--header="Restricted packages in $(basename "$dir")" \
+				--header="Restricted packages in $(basename "$dir")  (ctrl-u=check for updates)" \
 				--preview 'p={}; bat --color=always --style=numbers --line-range :500 "$PWD/srcpkgs/$p/template" ' \
 				--preview-window=right:50%:wrap \
-				--header='ctrl-u=check for updates' \
 				--bind "ctrl-u:preview( ./xbps-src update-check {} )"
-		)
+		) || true # fzf exits non-zero on Esc; don't let set -e abort
 
 		if [[ -z "$selection" ]]; then
 			echo "Nothing selected."
@@ -764,8 +799,7 @@ function xbld() {
 			return 1
 		fi
 	)
-	return $?
-}
+)
 
 function _Help_1line() {
 	helptext="${HELP_TEXT[$1]}"
@@ -777,12 +811,12 @@ function Help() {
 	local fname=$1
 	local exclude='^(_|nvm|gawk|have|Help|quote)'
 	if [[ ! $fname ]]; then
-		(compgen -A function | egrep -v $exclude | sort | while read f; do
-			printf "%s\034%s\n" $f "$(_Help_1line $f)"
+		(compgen -A function | grep -E -v $exclude | sort | while read -r f; do
+			printf "%s\034%s\n" "$f" "$(_Help_1line "$f")"
 		done) | column --table --separator $'\034'
 	else
 		if [[ $fname == '-l' ]]; then
-			compgen -A function | egrep -v $exclude | sort
+			compgen -A function | grep -E -v $exclude | sort
 		else
 			helptext="${HELP_TEXT[$fname]}"
 			if [[ $helptext ]]; then
@@ -796,9 +830,8 @@ function Help() {
 }
 
 function _Help_auto_complete() {
-	COMPREPLY=($(compgen -W "$(Help -l)" -- "$2"))
+	mapfile -t COMPREPLY < <(compgen -W "$(Help -l)" -- "$2")
 }
 complete -F _Help_auto_complete Help
 
 # vim:ft=bash
-# @fmt:off
